@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import MediaGallery from '@/components/media/MediaGallery'
+import MusicLibrary from '@/components/music/MusicLibrary'
 import type { Profile, Media } from '@/types/database'
 
-export default async function HimMediaPage() {
+export default async function HimMusicPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -11,14 +11,13 @@ export default async function HimMediaPage() {
   const { data } = await supabase
     .from('profiles').select('role').eq('id', user.id).single()
   const profile = data as Pick<Profile, 'role'> | null
-  if (profile?.role !== 'him') redirect('/her/media')
+  if (profile?.role !== 'him') redirect('/her/music')
 
-  const { data: media } = await supabase
-    .from('media')
-    .select('*')
+  const { data: tracks } = await supabase
+    .from('media').select('*')
     .eq('user_id', user.id)
-    .in('type', ['photo', 'video'])
+    .eq('type', 'music')
     .order('created_at', { ascending: false })
 
-  return <MediaGallery media={(media ?? []) as Media[]} role="him" userId={user.id} />
+  return <MusicLibrary tracks={(tracks ?? []) as Media[]} role="him" userId={user.id} />
 }

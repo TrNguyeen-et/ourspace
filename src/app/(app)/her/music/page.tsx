@@ -15,7 +15,8 @@ export default async function HerMusicPage() {
 
   const { data: tracks } = await supabase
     .from('media').select('*')
-    .eq('user_id', user.id).eq('type', 'music')
+    .eq('user_id', user.id)
+    .eq('type', 'music')
     .order('created_at', { ascending: false })
 
   return <MusicLibrary tracks={(tracks ?? []) as Media[]} role="her" userId={user.id} />

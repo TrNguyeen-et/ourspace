@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import MediaGallery from '@/components/media/MediaGallery'
-import type { Profile } from '@/types/database'
+import type { Profile, Media } from '@/types/database'
 
 export default async function HerMediaPage() {
   const supabase = await createClient()
@@ -9,11 +9,7 @@ export default async function HerMediaPage() {
   if (!user) redirect('/login')
 
   const { data } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
+    .from('profiles').select('role').eq('id', user.id).single()
   const profile = data as Pick<Profile, 'role'> | null
   if (profile?.role !== 'her') redirect('/him/media')
 
@@ -24,5 +20,5 @@ export default async function HerMediaPage() {
     .in('type', ['photo', 'video'])
     .order('created_at', { ascending: false })
 
-  return <MediaGallery media={media ?? []} role="her" userId={user.id} />
+  return <MediaGallery media={(media ?? []) as Media[]} role="her" userId={user.id} />
 }
