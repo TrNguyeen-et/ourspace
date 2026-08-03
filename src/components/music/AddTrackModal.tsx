@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Media } from '@/types/database'
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
+
 type Tab = 'upload' | 'youtube'
 
 export default function AddTrackModal({ userId, role, accent, onClose, onAdded }: {
@@ -45,9 +47,9 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
 
     const { error: upErr } = await supabase.storage
       .from('private-media').upload(path, file, { cacheControl: '3600' })
-    if (upErr) { setUploading(false); return }
+    if (upErr) { console.error(upErr); setUploading(false); return }
 
-    const caption = JSON.stringify({ title: title || file.name, artist: artist || '' })
+    const caption = JSON.stringify({ title: title || file.name.replace(/\.[^.]+$/, ''), artist: artist || '' })
     const { data: track } = await supabase.from('media').insert({
       user_id: userId, url: path, type: 'music',
       caption, thumbnail_url: null,
@@ -55,7 +57,7 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
     }).select().single()
 
     setUploading(false)
-    if (track) onAdded(track)
+    if (track) onAdded(track as Media)
   }
 
   async function handleAddYoutube() {
@@ -64,7 +66,7 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
     const caption = JSON.stringify({ title: title || ytMeta.title, artist: artist || ytMeta.artist })
     const { data: track } = await supabase.from('media').insert({
       user_id: userId,
-      url: ytMeta.embedUrl,  // lưu embed URL, không cần storage
+      url: ytMeta.embedUrl,
       type: 'music',
       caption,
       thumbnail_url: ytMeta.thumbnail,
@@ -73,7 +75,13 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
     }).select().single()
 
     setUploading(false)
-    if (track) onAdded(track)
+    if (track) onAdded(track as Media)
+  }
+
+  const inputStyle = {
+    width: '100%', padding: '10px 14px', borderRadius: 10,
+    border: '1.5px solid #e5e7eb', fontSize: 14, outline: 'none',
+    boxSizing: 'border-box' as const,
   }
 
   return (
@@ -87,7 +95,7 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 0, padding: '16px 24px 0', borderBottom: '1px solid #f3f4f6' }}>
+        <div style={{ display: 'flex', padding: '16px 24px 0', borderBottom: '1px solid #f3f4f6' }}>
           {([['upload', '📁 Upload file'], ['youtube', '🔗 YouTube']] as [Tab, string][]).map(([v, l]) => (
             <button key={v} onClick={() => setTab(v)} style={{
               padding: '8px 20px', fontSize: 13, fontWeight: tab === v ? 600 : 400,
@@ -115,33 +123,37 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
                   <>
                     <div style={{ fontSize: 28, marginBottom: 6 }}>📁</div>
                     <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>Click để chọn file nhạc</p>
-                    <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>MP3, M4A, WAV, FLAC · Tối đa 50MB</p>
+                    <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>MP3, M4A, WAV · Tối đa 50MB</p>
                   </>
                 )}
                 <input id="music-file-input" type="file" accept="audio/*" style={{ display: 'none' }}
-                  onChange={e => { const f = e.target.files?.[0]; if (f) { setFile(f); if (!title) setTitle(f.name.replace(/\.[^.]+$/, '')) } }} />
+                  onChange={e => {
+                    const f = e.target.files?.[0]
+                    if (f) { setFile(f); if (!title) setTitle(f.name.replace(/\.[^.]+$/, '')) }
+                  }} />
               </div>
 
-              <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Tên bài hát"
-                style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, outline: 'none' }}
+              <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Tên bài hát" style={inputStyle}
                 onFocus={e => e.target.style.borderColor = accent} onBlur={e => e.target.style.borderColor = '#e5e7eb'} />
-              <input type="text" value={artist} onChange={e => setArtist(e.target.value)} placeholder="Ca sĩ / nghệ sĩ"
-                style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, outline: 'none' }}
+              <input type="text" value={artist} onChange={e => setArtist(e.target.value)} placeholder="Ca sĩ / nghệ sĩ" style={inputStyle}
                 onFocus={e => e.target.style.borderColor = accent} onBlur={e => e.target.style.borderColor = '#e5e7eb'} />
 
-              <PoolToggle inPool={inPool} onChange={setInPool} accent={accent} />
+              <PoolToggle inPool={inPool} onChange={setInPool} />
 
-              <button onClick={handleUpload} disabled={!file || uploading} style={{ padding: '11px', borderRadius: 10, border: 'none', background: !file ? '#f3f4f6' : 'linear-gradient(135deg, #a855f7, ' + accent + ')', color: !file ? '#9ca3af' : 'white', fontSize: 14, fontWeight: 600, cursor: !file ? 'not-allowed' : 'pointer' }}>
-                {uploading ? 'Đang upload...' : 'Thêm vào kho nhạc'}
-              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={onClose} style={{ flex: 1, padding: '10px', borderRadius: 10, border: '1px solid #e5e7eb', background: 'white', color: '#6b7280', fontSize: 14, cursor: 'pointer' }}>Huỷ</button>
+                <button onClick={handleUpload} disabled={!file || uploading} style={{ flex: 2, padding: '11px', borderRadius: 10, border: 'none', background: !file ? '#f3f4f6' : 'linear-gradient(135deg, #a855f7, ' + accent + ')', color: !file ? '#9ca3af' : 'white', fontSize: 14, fontWeight: 600, cursor: !file ? 'not-allowed' : 'pointer' }}>
+                  {uploading ? 'Đang upload...' : 'Thêm vào kho nhạc'}
+                </button>
+              </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* YouTube URL */}
               <div style={{ display: 'flex', gap: 8 }}>
-                <input type="text" value={ytUrl} onChange={e => setYtUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..."
+                <input type="text" value={ytUrl} onChange={e => setYtUrl(e.target.value)}
+                  placeholder="https://youtube.com/watch?v=..."
                   onKeyDown={e => e.key === 'Enter' && fetchYoutubeMeta()}
-                  style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, outline: 'none' }}
+                  style={{ ...inputStyle, flex: 1 }}
                   onFocus={e => e.target.style.borderColor = accent} onBlur={e => e.target.style.borderColor = '#e5e7eb'} />
                 <button onClick={fetchYoutubeMeta} disabled={ytLoading || !ytUrl.trim()} style={{ padding: '10px 16px', borderRadius: 10, border: 'none', background: accent, color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
                   {ytLoading ? '...' : 'Lấy info'}
@@ -150,30 +162,30 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
 
               {ytError && <p style={{ fontSize: 13, color: '#ef4444', margin: 0 }}>{ytError}</p>}
 
-              {/* Preview */}
-              {ytMeta && (
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: '#fef9ee', borderRadius: 12, padding: '12px', border: '1px solid #fde68a' }}>
-                  <img src={ytMeta.thumbnail} alt="" style={{ width: 64, height: 48, objectFit: 'cover', borderRadius: 8 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ytMeta.title}</p>
-                    <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>{ytMeta.artist}</p>
-                  </div>
-                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: '#fef3c7', color: '#b45309' }}>YouTube</span>
-                </div>
-              )}
-
               {ytMeta && (
                 <>
-                  <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Tên bài hát"
-                    style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, outline: 'none' }}
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: '#fef9ee', borderRadius: 12, padding: '12px', border: '1px solid #fde68a' }}>
+                    <img src={ytMeta.thumbnail} alt="" style={{ width: 64, height: 48, objectFit: 'cover', borderRadius: 8 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ytMeta.title}</p>
+                      <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>{ytMeta.artist}</p>
+                    </div>
+                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: '#fef3c7', color: '#b45309' }}>YouTube</span>
+                  </div>
+
+                  <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Tên bài hát" style={inputStyle}
                     onFocus={e => e.target.style.borderColor = accent} onBlur={e => e.target.style.borderColor = '#e5e7eb'} />
-                  <input type="text" value={artist} onChange={e => setArtist(e.target.value)} placeholder="Ca sĩ / nghệ sĩ"
-                    style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, outline: 'none' }}
+                  <input type="text" value={artist} onChange={e => setArtist(e.target.value)} placeholder="Ca sĩ / nghệ sĩ" style={inputStyle}
                     onFocus={e => e.target.style.borderColor = accent} onBlur={e => e.target.style.borderColor = '#e5e7eb'} />
-                  <PoolToggle inPool={inPool} onChange={setInPool} accent={accent} />
-                  <button onClick={handleAddYoutube} disabled={uploading} style={{ padding: '11px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #a855f7, ' + accent + ')', color: 'white', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-                    {uploading ? 'Đang lưu...' : 'Thêm vào kho nhạc'}
-                  </button>
+
+                  <PoolToggle inPool={inPool} onChange={setInPool} />
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={onClose} style={{ flex: 1, padding: '10px', borderRadius: 10, border: '1px solid #e5e7eb', background: 'white', color: '#6b7280', fontSize: 14, cursor: 'pointer' }}>Huỷ</button>
+                    <button onClick={handleAddYoutube} disabled={uploading} style={{ flex: 2, padding: '11px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #a855f7, ' + accent + ')', color: 'white', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                      {uploading ? 'Đang lưu...' : 'Thêm vào kho nhạc'}
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -184,14 +196,14 @@ export default function AddTrackModal({ userId, role, accent, onClose, onAdded }
   )
 }
 
-function PoolToggle({ inPool, onChange, accent }: { inPool: boolean, onChange: (v: boolean) => void, accent: string }) {
+function PoolToggle({ inPool, onChange }: { inPool: boolean, onChange: (v: boolean) => void }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: '#faf5ff', border: '1px solid #e9d5ff' }}>
+    <div onClick={() => onChange(!inPool)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: '#faf5ff', border: '1px solid #e9d5ff', cursor: 'pointer' }}>
       <div>
         <p style={{ fontSize: 13, fontWeight: 500, color: '#374151', margin: 0 }}>🎲 Vào khu chung ngay</p>
         <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>Bài này sẽ được random khi mở OurSpace</p>
       </div>
-      <div onClick={() => onChange(!inPool)} style={{ width: 40, height: 22, borderRadius: 99, cursor: 'pointer', background: inPool ? '#7c3aed' : '#e5e7eb', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+      <div style={{ width: 40, height: 22, borderRadius: 99, cursor: 'pointer', background: inPool ? '#7c3aed' : '#e5e7eb', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
         <div style={{ position: 'absolute', top: 2, left: inPool ? 20 : 2, width: 18, height: 18, borderRadius: '50%', background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.2)', transition: 'left .2s' }} />
       </div>
     </div>

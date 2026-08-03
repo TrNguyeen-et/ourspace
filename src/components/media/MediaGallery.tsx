@@ -1,10 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Media } from '@/types/database'
 import MediaViewer from './MediaViewer'
 import UploadZone from './UploadZone'
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
+
+function getUrl(path: string): string {
+  if (!path) return ''
+  if (path.startsWith('http')) return path
+  return `${SUPABASE_URL}/storage/v1/object/public/private-media/${path}`
+}
 
 export default function MediaGallery({ media: initialMedia, role, userId }: {
   media: Media[], role: 'him' | 'her', userId: string
@@ -13,7 +21,6 @@ export default function MediaGallery({ media: initialMedia, role, userId }: {
   const [media, setMedia] = useState(initialMedia)
   const [filter, setFilter] = useState<'all' | 'photo' | 'video' | 'shared'>('all')
   const [viewing, setViewing] = useState<Media | null>(null)
-  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState(false)
   const [pushing, setPushing] = useState<string | null>(null)
   const [showUpload, setShowUpload] = useState(false)
@@ -21,21 +28,6 @@ export default function MediaGallery({ media: initialMedia, role, userId }: {
   const isHim = role === 'him'
   const accent = isHim ? '#3b82f6' : '#ec4899'
   const accentBg = isHim ? '#eff6ff' : '#fdf2f8'
-
-  useEffect(() => {
-    if (!media.length) return
-    const paths = media.map(m => m.url)
-    fetch('/api/media/signed-urls', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths }),
-    }).then(r => r.json()).then(({ urls }) => {
-      if (!urls) return
-      const map: Record<string, string> = {}
-      urls.forEach((item: { path: string; signedUrl: string }) => { map[item.path] = item.signedUrl })
-      setSignedUrls(map)
-    })
-  }, [media.length])
 
   async function handleUpload(files: File[], captions: Record<string, string>) {
     setUploading(true)
@@ -45,14 +37,14 @@ export default function MediaGallery({ media: initialMedia, role, userId }: {
       const ext = file.name.split('.').pop()
       const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
       const { error } = await supabase.storage.from('private-media').upload(path, file, { cacheControl: '3600' })
-      if (error) continue
+      if (error) { console.error('Upload error:', error); continue }
       const { data: inserted } = await supabase.from('media').insert({
         user_id: userId, url: path,
         type: isVideo ? 'video' : 'photo',
         caption: captions[file.name] || null,
         is_in_shared_pool: false, is_in_shared_album: false, source: 'upload',
       }).select().single()
-      if (inserted) uploaded.push(inserted)
+      if (inserted) uploaded.push(inserted as Media)
     }
     setMedia(prev => [...uploaded, ...prev])
     setShowUpload(false)
@@ -61,11 +53,7 @@ export default function MediaGallery({ media: initialMedia, role, userId }: {
 
   async function handlePushShared(item: Media) {
     setPushing(item.id)
-    await fetch('/api/media/push-shared', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mediaId: item.id, push: !item.is_in_shared_album }),
-    })
+    await supabase.from('media').update({ is_in_shared_album: !item.is_in_shared_album }).eq('id', item.id)
     setMedia(prev => prev.map(m => m.id === item.id ? { ...m, is_in_shared_album: !m.is_in_shared_album } : m))
     if (viewing?.id === item.id) setViewing(prev => prev ? { ...prev, is_in_shared_album: !prev.is_in_shared_album } : null)
     setPushing(null)
@@ -133,7 +121,7 @@ export default function MediaGallery({ media: initialMedia, role, userId }: {
       {filtered.length > 0 && (
         <div style={{ columns: '3 200px', gap: 10 }}>
           {filtered.map(item => (
-            <MediaCard key={item.id} item={item} signedUrl={signedUrls[item.url]} accent={accent}
+            <MediaCard key={item.id} item={item} url={getUrl(item.url)} accent={accent}
               pushing={pushing === item.id} onView={() => setViewing(item)}
               onPush={() => handlePushShared(item)} onDelete={() => handleDelete(item)} />
           ))}
@@ -141,14 +129,16 @@ export default function MediaGallery({ media: initialMedia, role, userId }: {
       )}
 
       {showUpload && <UploadZone onUpload={handleUpload} onClose={() => setShowUpload(false)} uploading={uploading} accent={accent} />}
-      {viewing && <MediaViewer item={viewing} signedUrl={signedUrls[viewing.url]} onClose={() => setViewing(null)}
-        onPush={() => handlePushShared(viewing)} onDelete={() => handleDelete(viewing)} pushing={pushing === viewing.id} />}
+      {viewing && (
+        <MediaViewer item={viewing} signedUrl={getUrl(viewing.url)} onClose={() => setViewing(null)}
+          onPush={() => handlePushShared(viewing)} onDelete={() => handleDelete(viewing)} pushing={pushing === viewing.id} />
+      )}
     </div>
   )
 }
 
-function MediaCard({ item, signedUrl, accent, pushing, onView, onPush, onDelete }: {
-  item: Media, signedUrl?: string, accent: string, pushing: boolean,
+function MediaCard({ item, url, accent, pushing, onView, onPush, onDelete }: {
+  item: Media, url: string, accent: string, pushing: boolean,
   onView: () => void, onPush: () => void, onDelete: () => void
 }) {
   const [hovered, setHovered] = useState(false)
@@ -157,15 +147,14 @@ function MediaCard({ item, signedUrl, accent, pushing, onView, onPush, onDelete 
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onView}>
       {item.type === 'video' ? (
         <div style={{ position: 'relative' }}>
-          {signedUrl ? <video src={signedUrl} style={{ width: '100%', display: 'block' }} preload="metadata" /> : <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1a1a2e' }}><span style={{ fontSize: 32 }}>🎬</span></div>}
+          <video src={url} style={{ width: '100%', display: 'block' }} preload="metadata" />
           <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <span style={{ fontSize: 16, color: 'white' }}>▶</span>
           </div>
         </div>
-      ) : signedUrl ? (
-        <img src={signedUrl} alt={item.caption || ''} style={{ width: '100%', display: 'block' }} loading="lazy" />
       ) : (
-        <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9f7ff' }}><span style={{ fontSize: 28, opacity: 0.4 }}>🖼️</span></div>
+        <img src={url} alt={item.caption || ''} style={{ width: '100%', display: 'block', minHeight: 80, background: '#f9f7ff' }} loading="lazy"
+          onError={e => { (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text y="50" font-size="40">🖼️</text></svg>' }} />
       )}
       {hovered && (
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: 10 }} onClick={e => e.stopPropagation()}>
